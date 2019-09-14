@@ -1,3 +1,0 @@
-read -p "pls input rbd name: " name
-read -p "pls input rbd size:[200G] " size
-rbd create $name -s $size --image-feature layering
