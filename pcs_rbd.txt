@@ -9,6 +9,10 @@ rbd ls
 rbd map disk1
 rbd showmapped
 mkfs.xfs /dev/rbd0
+mount /dev/rbd0 /mnt
+rbd resize disk1 -s 200G
+xfs_growfs /mnt
+umount /mnt
 rbd unmap disk1
 
 #on a pcs node
