@@ -1,0 +1,27 @@
+#on each pcs nodes
+yum install ceph-resource-agents
+ls /usr/lib/ocf/resource.d/ceph/
+pcs resource list ocf:ceph:rbd
+pcs property set stonith-enabled=false
+
+#on a pcs node
+rbd ls
+rbd map disk1
+rbd showmapped
+mkfs.xfs /dev/rbd0
+rbd unmap disk1
+
+#on a pcs node
+pcs resource create vip ocf:heartbeat:IPaddr2 ip=192.168.80.200 cidr_netmask=24 op monitor interval=30s
+
+pcs resource create rbd_map1 ocf:ceph:rbd user="admin" pool="rbd" name="disk1" cephconf="/etc/ceph/ceph.conf" op monitor interval="10s" timeout="20s"
+
+pcs resource create rbd_fs1 ocf:heartbeat:Filesystem device=/dev/rbd/rbd/disk1 directory=/mnt fstype=xfs op monitor interval=30s
+
+pcs resource group add rbdgroup vip rbd_map1 rbd_fs1
+
+#on each pcs nodes same config for smb and nfs service.
+pcs resource create smbd systemd:smb op monitor interval=1min
+pcs resource create nfsd systemd:nfs-server op monitor interval=1min
+pcs resource group add rbdgroup smbd
+pcs resource group add rbdgroup nfsd
