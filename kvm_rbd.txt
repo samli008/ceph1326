@@ -1,0 +1,128 @@
+#create ceph pool for kvm with script
+ceph osd pool create liyang 128
+ceph auth get-or-create client.libvirt mon 'allow r' osd 'allow class-read object_prefix rbd_children, allow rwx pool=liyang'
+cat > secret.xml << EOF
+<secret ephemeral='no' private='no'>
+<uuid>627d7af4-d92e-4a57-a80b-cfb8e1b30f7c</uuid>
+<usage type='ceph'>
+<name>client.cinder secret</name>
+</usage>
+</secret>
+EOF
+virsh secret-define --file secret.xml
+ceph auth get-key client.libvirt > client.libvirt.key
+virsh secret-set-value --secret 627d7af4-d92e-4a57-a80b-cfb8e1b30f7c --base64 $(cat client.libvirt.key)
+
+#qemu-img create rbd and rbd snap operation
+qemu-img create -f rbd rbd:liyang/vm-image1 60G
+qemu-img convert -f qcow2 -O raw win2008r2 rbd:liyang/2008
+rbd snap create liyang/2008@vm
+rbd snap ls liyang/2008
+rbd snap protect liyang/2008@vm
+
+rbd clone liyang/2008@vm liyang/vm
+rbd children liyang/2008@vm
+rbd snap rollback liyang/2008@vm
+
+#create vm with ceph rbd snap script
+read -p "input vm type c6 c7 2008 [c7]:" vm
+vm=${vm:-c7}
+read -p "input vm name:" name
+read -p "input memory size [2G]:" mem
+mem=${mem:-2}
+mem=${mem*1024}
+read -p "input vcpu core [1]:" cpu
+cpu=${cpu:-1}
+read -p "input bridge [br1]:" br
+br=${br:-br1}
+read -p "VNC port [5921]:" port
+port=${port:-5921}
+read -p "VNC passwd:[liyang]" pass
+pass=${pass:-liyang}
+
+rbd clone liyang\/$vm@vm liyang\/$name
+virt-install --name $name --virt-type kvm --ram $mem --vcpus $cpu,maxvcpus=4 \
+--boot hd,network,menu=on \
+--import --disk source_protocol=rbd,source_name=liyang\/$name,source_host_name=ceph1,source_host_port=6789,cache=none,bus=virtio \
+--network bridge=$br,model=virtio --graphics vnc,password=$pass,port=$port,listen=0.0.0.0 \
+--noautoconsole --noreboot
+
+cp /etc/libvirt/qemu/$name.xml /kvm/xml/$name.xml
+
+virsh undefine $name
+sed -i "/<\/console>/a <input type='tablet' bus='usb'\/>" /kvm/xml/$name.xml
+sed -i "/<target dev='vda' bus='virtio'\/>/a \
+<auth username='libvirt'>\n\
+<secret type='ceph' uuid='627d7af4-d92e-4a57-a80b-cfb8e1b30f7c'\/>\n\
+<\/auth>" /kvm/xml/$name.xml
+virsh define /kvm/xml/$name.xml
+
+#ssh cephb virsh define /kvm/xml/$name.xml
+virsh start $name
+echo "vmname:$name vncport:$port vncpasswd:$pass" >> /kvm/vm-list
+echo "please start vm and via VNC port $port connection vm"
+
+#create ceph rbd and add rbd to vm with script
+read -p "input vmname: " vm
+read -p "input new rbd name[pool/rbd]: " rbd
+read -p "input new rbd size[10G]: " size
+read -p "input virtual disk name: " vd
+rbd create $rbd -s $size
+echo "
+<disk type='network' device='disk'>
+<driver name='qemu' type='raw'/>
+<auth username='libvirt'>
+<secret type='ceph' uuid='627d7af4-d92e-4a57-a80b-cfb8e1b30f7c'/>
+</auth>
+<source protocol='rbd' name='$rbd'>
+<host name='ceph1' port='6789'/>
+</source>
+<target dev='$vd' bus='virtio'/>
+</disk>
+" > device.xml
+
+virsh attach-device $vm device.xml --persistent
+rm -f device.xml
+virsh domblklist $vm
+
+#attach ceph rbd to vm with script
+read -p "input vmname: " vm
+read -p "input new rbd name[pool/rbd]: " rbd
+read -p "input virtual disk name: " vd
+echo "
+<disk type='network' device='disk'>
+<driver name='qemu' type='raw'/>
+<auth username='libvirt'>
+<secret type='ceph' uuid='627d7af4-d92e-4a57-a80b-cfb8e1b30f7c'/>
+</auth>
+<source protocol='rbd' name='$rbd'>
+<host name='ceph1' port='6789'/>
+</source>
+<target dev='$vd' bus='virtio'/>
+</disk>
+" > device.xml
+
+virsh attach-device $vm device.xml --persistent
+rm -f device.xml
+virsh domblklist $vm
+
+#detach ceph rbd from vm with script
+read -p "input vmname: " vm
+read -p "input new rbd name[pool/rbd]: " rbd
+read -p "input virtual disk name: " vd
+echo "
+<disk type='network' device='disk'>
+<driver name='qemu' type='raw'/>
+<auth username='libvirt'>
+<secret type='ceph' uuid='627d7af4-d92e-4a57-a80b-cfb8e1b30f7c'/>
+</auth>
+<source protocol='rbd' name='$rbd'>
+<host name='ceph1' port='6789'/>
+</source>
+<target dev='$vd' bus='virtio'/>
+</disk>
+" > device.xml
+
+virsh detach-device $vm device.xml --persistent
+rm -f device.xml
+virsh domblklist $vm
