@@ -30,7 +30,7 @@ vm=${vm:-c7}
 read -p "input vm name:" name
 read -p "input memory size [2G]:" mem
 mem=${mem:-2}
-mem=${mem*1024}
+mem=$((mem*1024))
 read -p "input vcpu core [1]:" cpu
 cpu=${cpu:-1}
 read -p "input bridge [br1]:" br
